@@ -1,0 +1,48 @@
+{
+  "all_images_summary": {
+    "num_images": 35957,
+    "num_valid": 33654,
+    "mean_reprojection_px": 48.62663173915964
+  },
+  "samples": [
+    {
+      "image": "SNGS-126_000036.jpg",
+      "status": "ok",
+      "mean_reprojection_px": 9.631028175354004,
+      "num_points": 9
+    },
+    {
+      "image": "SNGS-118_000262.jpg",
+      "status": "ok",
+      "mean_reprojection_px": 7.972452163696289,
+      "num_points": 8
+    },
+    {
+      "image": "SNGS-140_000345.jpg",
+      "status": "ok",
+      "mean_reprojection_px": 0.7650505304336548,
+      "num_points": 5
+    },
+    {
+      "image": "SNGS-137_000567.jpg",
+      "status": "ok",
+      "mean_reprojection_px": 9.233918190002441,
+      "num_points": 6
+    },
+    {
+      "image": "SNGS-135_000618.jpg",
+      "status": "ok",
+      "mean_reprojection_px": 680.7481689453125,
+      "num_points": 5
+    },
+    {
+      "image": "SNGS-128_000384.jpg",
+      "status": "ok",
+      "mean_reprojection_px": 5.375082015991211,
+      "num_points": 6
+    }
+  ],
+  "mean_reprojection_px_samples": 118.95428333679835,
+  "num_valid_samples": 6,
+  "num_sampled": 6
+}

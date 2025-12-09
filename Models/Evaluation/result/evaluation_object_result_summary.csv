@@ -1,0 +1,14 @@
+Metric,Average
+Detection Precision,0.614
+Detection Recall,0.529
+Detection mAP (per class avg),0.488
+Detection mean IoU (per class avg),0.717
+Detection mAP,0.492
+Detection mean IoU,0.766
+Tracking MOTA,0.641
+Tracking IDF1,0.832
+Tracking Mostly Tracked,0.0
+Tracking Mostly Lost,0.245
+Tracking ID Switches,133.306
+Clustering Purity,0.942
+FPS Average,44.571
