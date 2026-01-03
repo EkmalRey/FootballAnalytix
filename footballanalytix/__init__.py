@@ -84,6 +84,12 @@ from .field import (
     ViewTransformer,
     detect_field_keypoints,
     compute_view_transformers,
+    validate_homography,
+    should_update_homography,
+    check_keypoint_distribution,
+    HOMOGRAPHY_INTERVAL,
+    MIN_KEYPOINTS_STABLE,
+    MAX_REPROJ_ERROR,
 )
 
 # Visualization
@@ -142,6 +148,12 @@ __all__ = [
     "ViewTransformer",
     "detect_field_keypoints",
     "compute_view_transformers",
+    "validate_homography",
+    "should_update_homography",
+    "check_keypoint_distribution",
+    "HOMOGRAPHY_INTERVAL",
+    "MIN_KEYPOINTS_STABLE",
+    "MAX_REPROJ_ERROR",
     # Visualization
     "bgr_to_rgb_norm",
     "draw_pitch",

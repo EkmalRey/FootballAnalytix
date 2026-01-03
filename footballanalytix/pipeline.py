@@ -40,6 +40,8 @@ from .players import (
 from .field import (
     SoccerPitchConfiguration,
     compute_view_transformers,
+    validate_homography,
+    check_keypoint_distribution,
 )
 from .visualization import (
     draw_pitch,
@@ -245,16 +247,45 @@ def process_combined_frame(
     # Try to initialize team colors
     try_initialize_team_colors(state)
 
-    # Compute view transformers
-    pitch_to_frame, frame_to_pitch, frame_pts, pitch_pts = compute_view_transformers(
+    # Get frame dimensions for keypoint distribution check
+    frame_height = frame.shape[0]
+    
+    # Always run detection every frame (smooth tracking)
+    pitch_to_frame, frame_to_pitch, frame_pts, pitch_pts, avg_conf = compute_view_transformers(
         frame, field_model, config, conf
     )
     
-    if pitch_to_frame is not None and frame_to_pitch is not None:
+    # Validate the new homography before accepting it
+    should_update = False
+    if frame_to_pitch is not None and pitch_to_frame is not None:
+        # Check 1: Keypoint distribution (prevents collinear point issues)
+        has_good_distribution = check_keypoint_distribution(
+            frame_pts, frame_height, min_vertical_ratio=0.10
+        )
+        
+        # Check 2: Minimum keypoints for stability
+        has_enough_keypoints = len(frame_pts) >= 6
+        
+        # Check 3: Reprojection error validation
+        is_valid, reproj_error = validate_homography(
+            frame_to_pitch, frame_pts, pitch_pts
+        )
+        
+        # Accept if all checks pass, OR if we have no existing homography
+        if not state.has_homography():
+            # First valid homography - accept with minimal requirements
+            should_update = len(frame_pts) >= 4 and is_valid
+        else:
+            # Already have one - be more strict
+            should_update = has_good_distribution and has_enough_keypoints and is_valid
+    
+    if should_update:
         state.pitch_to_frame = pitch_to_frame
         state.frame_to_pitch = frame_to_pitch
         state.last_frame_points = frame_pts
         state.last_pitch_points = pitch_pts
+        state.last_homography_confidence = avg_conf
+        state.homography_frame_idx = frame_idx
 
     # Project detected keypoints for visualization
     detected_pitch_points = np.empty((0, 2), dtype=np.float32)

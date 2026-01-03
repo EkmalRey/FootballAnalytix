@@ -245,7 +245,7 @@ def detect_field_keypoints(
     model,
     config: SoccerPitchConfiguration,
     confidence: float = 0.65,
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> Tuple[np.ndarray, np.ndarray, float]:
     """
     Detect field keypoints and return matched pitch/frame point pairs.
     
@@ -256,7 +256,7 @@ def detect_field_keypoints(
         confidence: Detection confidence threshold
     
     Returns:
-        Tuple of (frame_points, pitch_points) as Nx2 arrays
+        Tuple of (frame_points, pitch_points, avg_confidence) as Nx2 arrays and float
     """
     result = model(frame, conf=confidence, verbose=False)[0]
     keypoints = getattr(result, "keypoints", None)
@@ -265,6 +265,7 @@ def detect_field_keypoints(
         return (
             np.empty((0, 2), dtype=np.float32),
             np.empty((0, 2), dtype=np.float32),
+            0.0,
         )
 
     xy = keypoints.xy
@@ -284,6 +285,7 @@ def detect_field_keypoints(
         return (
             np.empty((0, 2), dtype=np.float32),
             np.empty((0, 2), dtype=np.float32),
+            0.0,
         )
 
     mask = conf_np > confidence if conf_np is not None else np.ones(len(xy_np), dtype=bool)
@@ -291,13 +293,17 @@ def detect_field_keypoints(
         return (
             np.empty((0, 2), dtype=np.float32),
             np.empty((0, 2), dtype=np.float32),
+            0.0,
         )
 
     pitch_vertices = np.array(config.vertices, dtype=np.float32)[: len(xy_np)]
     frame_points = xy_np[mask].astype(np.float32)
     pitch_points = pitch_vertices[mask]
     
-    return frame_points, pitch_points
+    # Compute average confidence of valid keypoints
+    avg_confidence = float(np.mean(conf_np[mask])) if conf_np is not None else 1.0
+    
+    return frame_points, pitch_points, avg_confidence
 
 
 def compute_view_transformers(
@@ -305,7 +311,7 @@ def compute_view_transformers(
     model,
     config: SoccerPitchConfiguration,
     confidence: float = 0.65,
-) -> Tuple[Optional[ViewTransformer], Optional[ViewTransformer], np.ndarray, np.ndarray]:
+) -> Tuple[Optional[ViewTransformer], Optional[ViewTransformer], np.ndarray, np.ndarray, float]:
     """
     Compute forward and inverse view transformers from detected keypoints.
     
@@ -316,15 +322,166 @@ def compute_view_transformers(
         confidence: Detection confidence threshold
     
     Returns:
-        Tuple of (pitch_to_frame, frame_to_pitch, frame_points, pitch_points)
+        Tuple of (pitch_to_frame, frame_to_pitch, frame_points, pitch_points, avg_confidence)
         Transformers are None if not enough keypoints detected
     """
-    frame_points, pitch_points = detect_field_keypoints(frame, model, config, confidence)
+    frame_points, pitch_points, avg_conf = detect_field_keypoints(frame, model, config, confidence)
     
     if len(frame_points) < 4 or len(pitch_points) < 4:
-        return None, None, frame_points, pitch_points
+        return None, None, frame_points, pitch_points, avg_conf
     
     forward = ViewTransformer(source=pitch_points, target=frame_points)
     inverse = ViewTransformer(source=frame_points, target=pitch_points)
     
-    return forward, inverse, frame_points, pitch_points
+    return forward, inverse, frame_points, pitch_points, avg_conf
+
+
+# ---------------------------------------------------------------------------
+# Homography Stabilization
+# ---------------------------------------------------------------------------
+
+# Configuration constants
+HOMOGRAPHY_INTERVAL = 3       # Frames between detection attempts
+MIN_KEYPOINTS_STABLE = 6      # Minimum keypoints for stable homography
+MAX_REPROJ_ERROR = 150.0      # Maximum allowed reprojection error (pitch units)
+CONFIDENCE_THRESHOLD_MULT = 0.85  # Only update if new confidence > old * this
+
+
+def validate_homography(
+    transformer: ViewTransformer,
+    frame_points: npt.NDArray[np.float32],
+    pitch_points: npt.NDArray[np.float32],
+    max_error: float = MAX_REPROJ_ERROR,
+) -> Tuple[bool, float]:
+    """
+    Validate a homography by checking reprojection error.
+    
+    Args:
+        transformer: The ViewTransformer to validate
+        frame_points: Detected frame coordinates (Nx2)
+        pitch_points: Corresponding pitch coordinates (Nx2)
+        max_error: Maximum allowed mean reprojection error
+    
+    Returns:
+        Tuple of (is_valid, mean_error)
+    """
+    if frame_points.size == 0 or pitch_points.size == 0:
+        return False, float('inf')
+    
+    # Check matrix is finite
+    if not np.isfinite(transformer.m).all():
+        return False, float('inf')
+    
+    # Transform frame points to pitch and measure error
+    try:
+        projected = transformer.transform_points(frame_points)
+        errors = np.linalg.norm(projected - pitch_points, axis=1)
+        mean_error = float(np.mean(errors))
+        
+        return mean_error < max_error, mean_error
+    except Exception:
+        return False, float('inf')
+
+
+def check_keypoint_distribution(
+    frame_points: npt.NDArray[np.float32],
+    frame_height: int,
+    min_vertical_ratio: float = 0.15,
+) -> bool:
+    """
+    Check if keypoints are distributed well enough for stable homography.
+    
+    Rejects sets where all points are on a single horizontal band,
+    which causes unstable perspective transforms.
+    
+    Args:
+        frame_points: Detected frame coordinates (Nx2)
+        frame_height: Height of the video frame
+        min_vertical_ratio: Minimum vertical spread as fraction of frame height
+    
+    Returns:
+        True if distribution is acceptable
+    """
+    if frame_points.size == 0:
+        return False
+    
+    y_coords = frame_points[:, 1]
+    y_spread = np.max(y_coords) - np.min(y_coords)
+    
+    return (y_spread / frame_height) >= min_vertical_ratio
+
+
+def should_update_homography(
+    frame_idx: int,
+    current_confidence: float,
+    last_confidence: float,
+    last_update_frame: int,
+    has_existing: bool,
+    num_keypoints: int,
+    is_valid: bool,
+    force_interval: int = HOMOGRAPHY_INTERVAL,
+) -> bool:
+    """
+    Decide whether to update the homography transformer.
+    
+    Uses a hybrid strategy combining:
+    - Frame interval skipping (performance)
+    - Keypoint count requirements (quality)
+    - Confidence comparison (stability)
+    - Validity checking (correctness)
+    
+    Args:
+        frame_idx: Current frame index
+        current_confidence: Average confidence of current detections
+        last_confidence: Confidence when homography was last updated
+        last_update_frame: Frame index when homography was last updated
+        has_existing: Whether a valid homography already exists
+        num_keypoints: Number of keypoints detected
+        is_valid: Whether the new homography passed validation
+        force_interval: Frames between forced update attempts
+    
+    Returns:
+        True if homography should be updated
+    """
+    # Case 1: No existing homography - must accept if valid
+    if not has_existing:
+        return is_valid and num_keypoints >= 4
+    
+    # Case 2: Not enough keypoints for stable result
+    if num_keypoints < MIN_KEYPOINTS_STABLE:
+        return False
+    
+    # Case 3: New homography failed validation
+    if not is_valid:
+        return False
+    
+    # Case 4: Frame interval check (skip frames for performance)
+    frames_since_update = frame_idx - last_update_frame
+    if frames_since_update < force_interval:
+        return False
+    
+    # Case 5: Confidence comparison - only update if quality is similar or better
+    if current_confidence < last_confidence * CONFIDENCE_THRESHOLD_MULT:
+        return False
+    
+    return True
+
+
+def compute_keypoint_confidence(
+    keypoints_conf: Optional[npt.NDArray[np.float32]],
+    mask: npt.NDArray[np.bool_],
+) -> float:
+    """
+    Compute average confidence of valid keypoints.
+    
+    Args:
+        keypoints_conf: Confidence array from model (may be None)
+        mask: Boolean mask of valid keypoints
+    
+    Returns:
+        Average confidence (0.0 if no valid keypoints)
+    """
+    if keypoints_conf is None or not mask.any():
+        return 0.0
+    
+    return float(np.mean(keypoints_conf[mask]))

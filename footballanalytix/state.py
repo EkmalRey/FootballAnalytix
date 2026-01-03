@@ -39,6 +39,11 @@ class CombinedState:
     frame_to_pitch: Optional["ViewTransformer"] = None
     last_frame_points: np.ndarray = field(default_factory=lambda: np.empty((0, 2)))
     last_pitch_points: np.ndarray = field(default_factory=lambda: np.empty((0, 2)))
+    
+    # Homography stabilization fields
+    last_homography_confidence: float = 0.0
+    homography_frame_idx: int = -1
+    smoothed_player_positions: Dict[int, np.ndarray] = field(default_factory=dict)
 
     def reset_tracking(self) -> None:
         """Reset all tracking state (useful when scene changes significantly)."""
