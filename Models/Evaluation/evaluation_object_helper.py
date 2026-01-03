@@ -38,7 +38,8 @@ except Exception:  # pragma: no cover - optional
     YOLO = None  # type: ignore
 
 # Local helpers
-from config import ObjectDetectionConfig, load_game_annotations
+from footballanalytix.config import ObjectDetectionConfig
+from footballanalytix.dataset import load_game_annotations
 from _1_download_dataset import download_dataset
 from _2_process_raw_dataset import export_tracking_groundtruth
 

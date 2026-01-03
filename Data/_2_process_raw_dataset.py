@@ -24,9 +24,11 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
 import matplotlib.pyplot as plt
 
-from config import (
+from footballanalytix.config import (
 	ObjectDetectionConfig,
 	PoseEstimationConfig,
+)
+from footballanalytix.dataset import (
 	get_game_folders,
 	load_game_annotations,
 )

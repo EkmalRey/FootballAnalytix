@@ -45,8 +45,8 @@ EXTERNAL_HELP_DIR = PROJECT_ROOT / "External Help"
 if str(EXTERNAL_HELP_DIR) not in sys.path:
 	sys.path.append(str(EXTERNAL_HELP_DIR))
 
-from config import (  # type: ignore
-	PoseEstimationConfig,
+from footballanalytix.config import PoseEstimationConfig
+from footballanalytix.dataset import (
 	get_game_folders,
 	load_game_annotations,
 )
